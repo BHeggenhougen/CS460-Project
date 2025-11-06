@@ -688,14 +688,31 @@ enum class ASTElements {
 
 std::vector<ASTElements> basicAST;
 
+int precedence(std::string s) {
+
+}
+
+std::vector<std::string> toPostFix(std::vector<Token>& tokens) {
+    std::stack<Token> newList;
+    for (int i = 0; i < tokens.size(); i++) {
+        if (tokens[i].type == TokenType::IDENTIFIER) {
+            newList.push(tokens[i]);
+        } else if (tokens[i].token == "^" || tokens[i].token == "+" || tokens[i].token == "*" || tokens[i].token == "/" || tokens[i].token == "-") {
+
+        }
+    }
+}
+
 CSTNode* buildAST(const std::vector<ASTElements>& elements, const std::vector<Token>& tokens) {
     CSTNode* root = nullptr;
     CSTNode* attachPoint   = nullptr;
     int lineNumber = tokens[0].line;
     int currentTokenIndex = 0;
+    bool isForLoop = false;
 
     for (const auto& e : elements) {
         std::vector<std::string> stringsToBeAdded;
+        std::vector<Token> tokensToPostFix;
         std::string ASTElementString;
         if (e == ASTElements::DECLARATION) ASTElementString = "DECLARATION";
         else if (e == ASTElements::BEGINBLOCK) ASTElementString = "BEGIN BLOCK";
@@ -703,41 +720,159 @@ CSTNode* buildAST(const std::vector<ASTElements>& elements, const std::vector<To
         else if (e == ASTElements::ELSE) ASTElementString = "ELSE";
         else if (e == ASTElements::ASSIGNMENT) {
             ASTElementString = "ASSIGNMENT ";
-        } else if (e == ASTElements::RETURN) {
-            ASTElementString = "RETURN ";
             while (tokens[currentTokenIndex].line == lineNumber) {
                 if (tokens[currentTokenIndex].type == TokenType::IDENTIFIER) {
                     stringsToBeAdded.push_back(tokens[currentTokenIndex].token);
+                    currentTokenIndex++;
+                    break;
                 }
+                currentTokenIndex++;
+            }
+            while (tokens[currentTokenIndex].line == lineNumber && tokens[currentTokenIndex].type != TokenType::SEMICOLON) {
+                stringsToBeAdded.push_back(tokens[currentTokenIndex].token);
+                currentTokenIndex++;
+            }
+        } else if (e == ASTElements::RETURN) {
+            ASTElementString = "RETURN ";
+            currentTokenIndex++;
+            while (tokens[currentTokenIndex].type == TokenType::L_PAREN) {
+                currentTokenIndex++;
+            }
+            while (tokens[currentTokenIndex].line == lineNumber && tokens[currentTokenIndex].type != TokenType::SEMICOLON && tokens[currentTokenIndex].type != TokenType::R_PAREN) {
+                stringsToBeAdded.push_back(tokens[currentTokenIndex].token);
                 currentTokenIndex++;
             }
         } else if (e == ASTElements::PRINTF) {
             ASTElementString = "PRINTF ";
+            while (tokens[currentTokenIndex].line == lineNumber) {
+                if (tokens[currentTokenIndex].type == TokenType::DOUBLE_QUOTE || tokens[currentTokenIndex].type == TokenType::SINGLE_QUOTE) {
+                    currentTokenIndex++;
+                    stringsToBeAdded.push_back(tokens[currentTokenIndex].token);
+                    break;
+                }
+                currentTokenIndex++;
+            }
+            while (tokens[currentTokenIndex].line == lineNumber) {
+                if (tokens[currentTokenIndex].type == TokenType::COMMA) {
+                    currentTokenIndex++;
+                    stringsToBeAdded.push_back(tokens[currentTokenIndex].token);
+                }
+                currentTokenIndex++;
+            }
         } else if (e == ASTElements::IF) {
+            int numParens = 0;
             ASTElementString = "IF ";
+            currentTokenIndex++;
+            while (tokens[currentTokenIndex].type == TokenType::L_PAREN) {
+                currentTokenIndex++;
+            }
+            while (tokens[currentTokenIndex].line == lineNumber) {
+                if (tokens[currentTokenIndex].type == TokenType::L_PAREN)  numParens++;
+                if (tokens[currentTokenIndex].type != TokenType::R_PAREN || ( tokens[currentTokenIndex].type == TokenType::R_PAREN && numParens > 0)) {
+                    if (tokens[currentTokenIndex].type == TokenType::R_PAREN) numParens--;
+                    stringsToBeAdded.push_back(tokens[currentTokenIndex].token);
+                }
+                currentTokenIndex++;
+            }
         } else if (e == ASTElements::FOR) {
-            ASTElementString = "FOR ";
+            //isForLoop = true;
+            ASTElementString = "FOR EXPRESSION 1";
+            //currentTokenIndex = currentTokenIndex + 2;
+            /*while (tokens[currentTokenIndex].line == lineNumber && tokens[currentTokenIndex].type != TokenType::SEMICOLON) {
+                stringsToBeAdded.push_back(tokens[currentTokenIndex].token);
+                currentTokenIndex++;
+            }
+            CSTNode* node = createCSTNode(ASTElementString);
+            if (!root) root = node;
+            if (attachPoint) {
+                attachPoint->left = node;
+            }
+
+            CSTNode* tail = node;
+            for (const auto& s : stringsToBeAdded) {
+                CSTNode* sn = createCSTNode(s);
+                tail->right = sn;
+                tail = sn;
+            }
+            attachPoint = tail;
+            while (!stringsToBeAdded.empty()) {
+                stringsToBeAdded.pop_back();
+            }
+            ASTElementString = "FOR EXPRESSION 2";
+            while (tokens[currentTokenIndex].line == lineNumber && tokens[currentTokenIndex].type != TokenType::SEMICOLON) {
+                stringsToBeAdded.push_back(tokens[currentTokenIndex].token);
+                currentTokenIndex++;
+            }
+            node = createCSTNode(ASTElementString);
+            if (attachPoint) {
+                attachPoint->left = node;
+            }
+
+            tail = node;
+            for (const auto& s : stringsToBeAdded) {
+                CSTNode* sn = createCSTNode(s);
+                tail->right = sn;
+                tail = sn;
+            }
+            attachPoint = tail;
+            while (!stringsToBeAdded.empty()) {
+                stringsToBeAdded.pop_back();
+            }
+            ASTElementString = "FOR EXPRESSION 3";
+            while (tokens[currentTokenIndex].line == lineNumber) {
+                if (tokens[currentTokenIndex].type == TokenType::L_PAREN)  numParens++;
+                if (tokens[currentTokenIndex].type != TokenType::R_PAREN || ( tokens[currentTokenIndex].type == TokenType::R_PAREN && numParens > 0)) {
+                    if (tokens[currentTokenIndex].type == TokenType::R_PAREN) numParens--;
+                    stringsToBeAdded.push_back(tokens[currentTokenIndex].token);
+                }
+                currentTokenIndex++;
+            }
+            node = createCSTNode(ASTElementString);
+            if (!root) root = node;
+            if (attachPoint) {
+                attachPoint->left = node;
+            }
+
+            tail = node;
+            for (const auto& s : stringsToBeAdded) {
+                CSTNode* sn = createCSTNode(s);
+                tail->right = sn;
+                tail = sn;
+            }
+            attachPoint = tail;*/
         } else if (e == ASTElements::WHILE) {
             ASTElementString = "WHILE ";
+            currentTokenIndex++;
+            while (tokens[currentTokenIndex].line == lineNumber) {
+                if (tokens[currentTokenIndex].type != TokenType::L_PAREN && tokens[currentTokenIndex].type != TokenType::R_PAREN) {
+                    stringsToBeAdded.push_back(tokens[currentTokenIndex].token);
+                }
+                currentTokenIndex++;
+            }
         } else if (e == ASTElements::CALL) {
             ASTElementString = "CALL ";
+            while (tokens[currentTokenIndex].line == lineNumber && tokens[currentTokenIndex].type != TokenType::SEMICOLON) {
+                stringsToBeAdded.push_back(tokens[currentTokenIndex].token);
+                currentTokenIndex++;
+            }
         }
+        if (!isForLoop) {
+            CSTNode* node = createCSTNode(ASTElementString);
+            if (!root) root = node; // first token becomes root
+            // Attach this element as the LEFT child of the previous "tail" (if any)
+            if (attachPoint) {
+                attachPoint->left = node;
+            }
 
-        CSTNode* node = createCSTNode(ASTElementString);
-        if (!root) root = node; // first token becomes root
-        // Attach this element as the LEFT child of the previous "tail" (if any)
-        if (attachPoint) {
-            attachPoint->left = node;
+            // Build the right chain of strings for this element
+            CSTNode* tail = node;
+            for (const auto& s : stringsToBeAdded) {
+                CSTNode* sn = createCSTNode(s);
+                tail->right = sn;
+                tail = sn;
+            }
+            attachPoint = tail;
         }
-
-        // Build the right chain of strings for this element
-        CSTNode* tail = node;
-        for (const auto& s : stringsToBeAdded) {
-            CSTNode* sn = createCSTNode(s);
-            tail->right = sn;
-            tail = sn;
-        }
-        attachPoint = tail;
 
         while (tokens[currentTokenIndex].line == lineNumber) currentTokenIndex++;
         lineNumber = tokens[currentTokenIndex].line;
@@ -1304,7 +1439,8 @@ int main( int argc, char *argv[] ) {
                 }
                 std::vector<ASTElements> test = basicAST;
                 CSTNode* AST = buildAST(test, tokenList);
-                printSymbolTable(head);
+                printCST(AST);
+                //printSymbolTable(head);
                 /*CSTNode* root = buildCSTFromTokens(tokenList);
 
                 if (!root) {
