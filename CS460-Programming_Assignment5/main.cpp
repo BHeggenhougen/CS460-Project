@@ -690,9 +690,7 @@ std::vector<ASTElements> basicAST;
 
 CSTNode* buildAST(const std::vector<ASTElements>& elements, const std::vector<Token>& tokens) {
     CSTNode* root = nullptr;
-    CSTNode* prevLineLast = nullptr;   // last token node of previous non-empty line
-    CSTNode* currentLineFirst  = nullptr;  // first token of current line
-    CSTNode* currentLineLast   = nullptr;  // last token of current line
+    CSTNode* attachPoint   = nullptr;
     int lineNumber = tokens[0].line;
     int currentTokenIndex = 0;
 
@@ -727,34 +725,23 @@ CSTNode* buildAST(const std::vector<ASTElements>& elements, const std::vector<To
 
         CSTNode* node = createCSTNode(ASTElementString);
         if (!root) root = node; // first token becomes root
-        if (!currentLineFirst) {
-            currentLineFirst = currentLineLast = node; // first token in this line
+        // Attach this element as the LEFT child of the previous "tail" (if any)
+        if (attachPoint) {
+            attachPoint->left = node;
         }
-        if (currentLineFirst) {
-            if (prevLineLast && !prevLineLast->left) {
-                prevLineLast->left = currentLineFirst;
-            }
-            prevLineLast = currentLineLast;
-            currentLineFirst = currentLineLast = nullptr;
-        }
+
+        // Build the right chain of strings for this element
+        CSTNode* tail = node;
         for (const auto& s : stringsToBeAdded) {
-            node = createCSTNode(s);
-            /*if (!currentLineFirst) {
-                currentLineFirst = currentLineLast = node; // first token in this line
-            } else {*/
-                prevLineLast->right = node;         // right sibling
-                currentLineFirst = currentLineLast = node;
-            //}
+            CSTNode* sn = createCSTNode(s);
+            tail->right = sn;
+            tail = sn;
         }
+        attachPoint = tail;
+
         while (tokens[currentTokenIndex].line == lineNumber) currentTokenIndex++;
         lineNumber = tokens[currentTokenIndex].line;
     }
-    // handle a file that doesn't end with a new line
-    /*if (currentLineFirst) {
-        if (prevLineLast && !prevLineLast->left) {
-            prevLineLast->left = currentLineFirst;
-        }
-    }*/
     return root;
 }
 
@@ -1316,6 +1303,7 @@ int main( int argc, char *argv[] ) {
                     return 1;
                 }
                 std::vector<ASTElements> test = basicAST;
+                CSTNode* AST = buildAST(test, tokenList);
                 printSymbolTable(head);
                 /*CSTNode* root = buildCSTFromTokens(tokenList);
 
