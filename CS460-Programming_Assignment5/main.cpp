@@ -695,33 +695,23 @@ CSTNode* buildAST(const std::vector<ASTElements>& elements, const std::vector<To
     CSTNode* currentLineLast   = nullptr;  // last token of current line
     int lineNumber = tokens[0].line;
     int currentTokenIndex = 0;
-    int ASTLineTracker = 0;
 
     for (const auto& e : elements) {
-        /*if (t.line > lineNumber) { // Set the first token of the next line as the child (left pointer) of the last token on the current line
-            lineNumber = t.line;
-            ASTLineTracker++;
-            if (currentLineFirst) {
-                if (prevLineLast && !prevLineLast->left) {
-                    prevLineLast->left = currentLineFirst;
-                }
-                prevLineLast = currentLineLast;
-                currentLineFirst = currentLineLast = nullptr;
-            }
-        }*/
-
         std::vector<std::string> stringsToBeAdded;
         std::string ASTElementString;
         if (e == ASTElements::DECLARATION) ASTElementString = "DECLARATION";
         else if (e == ASTElements::BEGINBLOCK) ASTElementString = "BEGIN BLOCK";
         else if (e == ASTElements::ENDBLOCK) ASTElementString = "END BLOCK";
         else if (e == ASTElements::ELSE) ASTElementString = "ELSE";
-        else if (e == ASTElements::RETURN) {
+        else if (e == ASTElements::ASSIGNMENT) {
+            ASTElementString = "ASSIGNMENT ";
+        } else if (e == ASTElements::RETURN) {
             ASTElementString = "RETURN ";
             while (tokens[currentTokenIndex].line == lineNumber) {
                 if (tokens[currentTokenIndex].type == TokenType::IDENTIFIER) {
                     stringsToBeAdded.push_back(tokens[currentTokenIndex].token);
                 }
+                currentTokenIndex++;
             }
         } else if (e == ASTElements::PRINTF) {
             ASTElementString = "PRINTF ";
@@ -739,26 +729,32 @@ CSTNode* buildAST(const std::vector<ASTElements>& elements, const std::vector<To
         if (!root) root = node; // first token becomes root
         if (!currentLineFirst) {
             currentLineFirst = currentLineLast = node; // first token in this line
-        } else {
-            currentLineLast->right = node;         // right sibling
-            currentLineLast = node;
+        }
+        if (currentLineFirst) {
+            if (prevLineLast && !prevLineLast->left) {
+                prevLineLast->left = currentLineFirst;
+            }
+            prevLineLast = currentLineLast;
+            currentLineFirst = currentLineLast = nullptr;
         }
         for (const auto& s : stringsToBeAdded) {
-            CSTNode* newNode = createCSTNode(s);
-            if (!currentLineFirst) {
+            node = createCSTNode(s);
+            /*if (!currentLineFirst) {
                 currentLineFirst = currentLineLast = node; // first token in this line
-            } else {
-                currentLineLast->right = node;         // right sibling
-                currentLineLast = node;
-            }
+            } else {*/
+                prevLineLast->right = node;         // right sibling
+                currentLineFirst = currentLineLast = node;
+            //}
         }
+        while (tokens[currentTokenIndex].line == lineNumber) currentTokenIndex++;
+        lineNumber = tokens[currentTokenIndex].line;
     }
     // handle a file that doesn't end with a new line
-    if (currentLineFirst) {
+    /*if (currentLineFirst) {
         if (prevLineLast && !prevLineLast->left) {
             prevLineLast->left = currentLineFirst;
         }
-    }
+    }*/
     return root;
 }
 
@@ -1294,9 +1290,6 @@ bool parseProgram(TokenStream& ts) {
 }
 
 int main( int argc, char *argv[] ) {
-    /*int a = 5;
-    std::string b = "hello";
-    printf( "%10s %d\n%10s %s\n", "Integer:", a, "String:",  b.c_str());*/
     // Check for an input file and test opening it
     if( argc != 2 ) {
         std::cout << "No file included. Please include a file.\n";
