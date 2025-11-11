@@ -708,13 +708,23 @@ CSTNode* buildAST(const std::vector<ASTElements>& elements, const std::vector<To
     CSTNode* attachPoint   = nullptr;
     int lineNumber = tokens[0].line;
     int currentTokenIndex = 0;
-    bool isForLoop = false;
 
     for (const auto& e : elements) {
         std::vector<std::string> stringsToBeAdded;
         std::vector<Token> tokensToPostFix;
         std::string ASTElementString;
-        if (e == ASTElements::DECLARATION) ASTElementString = "DECLARATION";
+        bool multipleDeclarations = false;
+        bool isForLoop = false;
+        int iter = 0;
+        if (e == ASTElements::DECLARATION) {
+            ASTElementString = "DECLARATION";
+            currentTokenIndex++;
+            if (iter == 0) currentTokenIndex++;
+            if (tokens[currentTokenIndex].type == TokenType::COMMA) {
+                iter++;
+                multipleDeclarations = true;
+            }
+        }
         else if (e == ASTElements::BEGINBLOCK) ASTElementString = "BEGIN BLOCK";
         else if (e == ASTElements::ENDBLOCK) ASTElementString = "END BLOCK";
         else if (e == ASTElements::ELSE) ASTElementString = "ELSE";
@@ -761,11 +771,12 @@ CSTNode* buildAST(const std::vector<ASTElements>& elements, const std::vector<To
             }
         } else if (e == ASTElements::IF) {
             int numParens = 0;
+            bool isId = false;
             ASTElementString = "IF ";
             currentTokenIndex++;
-            while (tokens[currentTokenIndex].type == TokenType::L_PAREN) {
+            /*while (tokens[currentTokenIndex].type == TokenType::L_PAREN) {
                 currentTokenIndex++;
-            }
+            }*/
             while (tokens[currentTokenIndex].line == lineNumber) {
                 if (tokens[currentTokenIndex].type == TokenType::L_PAREN)  numParens++;
                 if (tokens[currentTokenIndex].type != TokenType::R_PAREN || ( tokens[currentTokenIndex].type == TokenType::R_PAREN && numParens > 0)) {
@@ -775,10 +786,11 @@ CSTNode* buildAST(const std::vector<ASTElements>& elements, const std::vector<To
                 currentTokenIndex++;
             }
         } else if (e == ASTElements::FOR) {
-            //isForLoop = true;
+            int numParens = 0;
+            isForLoop = true;
             ASTElementString = "FOR EXPRESSION 1";
-            //currentTokenIndex = currentTokenIndex + 2;
-            /*while (tokens[currentTokenIndex].line == lineNumber && tokens[currentTokenIndex].type != TokenType::SEMICOLON) {
+            currentTokenIndex = currentTokenIndex + 2;
+            while (tokens[currentTokenIndex].line == lineNumber && tokens[currentTokenIndex].type != TokenType::SEMICOLON) {
                 stringsToBeAdded.push_back(tokens[currentTokenIndex].token);
                 currentTokenIndex++;
             }
@@ -798,6 +810,7 @@ CSTNode* buildAST(const std::vector<ASTElements>& elements, const std::vector<To
             while (!stringsToBeAdded.empty()) {
                 stringsToBeAdded.pop_back();
             }
+            currentTokenIndex++;
             ASTElementString = "FOR EXPRESSION 2";
             while (tokens[currentTokenIndex].line == lineNumber && tokens[currentTokenIndex].type != TokenType::SEMICOLON) {
                 stringsToBeAdded.push_back(tokens[currentTokenIndex].token);
@@ -818,6 +831,7 @@ CSTNode* buildAST(const std::vector<ASTElements>& elements, const std::vector<To
             while (!stringsToBeAdded.empty()) {
                 stringsToBeAdded.pop_back();
             }
+            currentTokenIndex++;
             ASTElementString = "FOR EXPRESSION 3";
             while (tokens[currentTokenIndex].line == lineNumber) {
                 if (tokens[currentTokenIndex].type == TokenType::L_PAREN)  numParens++;
@@ -839,7 +853,7 @@ CSTNode* buildAST(const std::vector<ASTElements>& elements, const std::vector<To
                 tail->right = sn;
                 tail = sn;
             }
-            attachPoint = tail;*/
+            attachPoint = tail;
         } else if (e == ASTElements::WHILE) {
             ASTElementString = "WHILE ";
             currentTokenIndex++;
@@ -874,7 +888,9 @@ CSTNode* buildAST(const std::vector<ASTElements>& elements, const std::vector<To
             attachPoint = tail;
         }
 
-        while (tokens[currentTokenIndex].line == lineNumber) currentTokenIndex++;
+        if (!multipleDeclarations) {
+            while (tokens[currentTokenIndex].line == lineNumber) currentTokenIndex++;
+        }
         lineNumber = tokens[currentTokenIndex].line;
     }
     return root;
