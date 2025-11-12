@@ -3,6 +3,7 @@
 #include <regex>
 #include <vector>
 #include <sstream>
+#include <unordered_set>
 
 enum class TokenType {
     // special characters
@@ -688,19 +689,136 @@ enum class ASTElements {
 
 std::vector<ASTElements> basicAST;
 
-int precedence(std::string s) {
-
+// ---------- Postfix helpers ----------
+// check for operators
+static bool isOperator(const std::string& t) {
+    static const std::unordered_set<std::string> ops = {
+        "=", "||", "&&", "==", "!=", "<=", ">=", "<", ">", "+", "-", "*", "/", "%", "!"
+    };
+    return ops.count(t) > 0;
 }
 
-std::vector<std::string> toPostFix(std::vector<Token>& tokens) {
-    std::stack<Token> newList;
-    for (int i = 0; i < tokens.size(); i++) {
-        if (tokens[i].type == TokenType::IDENTIFIER) {
-            newList.push(tokens[i]);
-        } else if (tokens[i].token == "^" || tokens[i].token == "+" || tokens[i].token == "*" || tokens[i].token == "/" || tokens[i].token == "-") {
+// check for left associative character
+static bool isLeftAssociative(const std::string& op) {
+    if (op == "=") return false;
+    if (op == "!") return false;
+    return true;
+}
 
-        }
+// check operator precedence (higher number is higher precedence)
+int precedence(std::string s) {
+    if (s == "!")  return 7;
+    if (s == "*" || s == "/" || s == "%") return 6;
+    if (s == "+" || s == "-")           return 5;
+    if (s == "<" || s == ">" || s == "<=" || s == ">=") return 4;
+    if (s == "==" || s == "!=")         return 3;
+    if (s == "&&")                      return 2;
+    if (s == "||")                      return 1;
+    if (s == "=")                       return 0;
+    return -1; // non-operator
+}
+
+// checks for categorizing character
+static bool isParen(const std::string& t)   { return t == "(" || t == ")"; }
+static bool isBracket(const std::string& t) { return t == "[" || t == "]"; }
+// check for identifiers so that parentheses are not removed
+static bool looksIdentifier(const std::string& t) {
+    if (t.empty()) return false;
+    if (!(std::isalpha((unsigned char)t[0]) || t[0] == '_')) return false;
+    for (size_t i = 1; i < t.size(); ++i) {
+        if (!(std::isalnum((unsigned char)t[i]) || t[i] == '_')) return false;
     }
+    return true;
+}
+
+// check for function calls for not removing parentheses
+static bool isPotentialFunctionCall(const std::vector<std::string>& v, size_t i) {
+    return i + 1 < v.size() && looksIdentifier(v[i]) && v[i + 1] == "(";
+}
+
+// copies balanced parentheses
+static void copyBalanced(const std::vector<std::string>& in, size_t& i, std::vector<std::string>& out, const std::string& openTok, const std::string& closeTok) {
+    int depth = 0;
+    do {
+        if (in[i] == openTok) ++depth;
+        else if (in[i] == closeTok) --depth;
+        out.push_back(in[i]);
+        ++i;
+    } while (i < in.size() && depth > 0);
+}
+
+// infix to postfix converter
+std::vector<std::string> toPostFix(const std::vector<std::string>& infix) {
+    std::vector<std::string> output;
+    std::vector<std::string> opstack;
+
+    // scan input tokens
+    for (size_t i = 0; i < infix.size();) {
+        const std::string& tok = infix[i];
+
+        // check for function calls
+        if (isPotentialFunctionCall(infix, i)) {
+            // push identifier
+            output.push_back(infix[i++]);          // function name
+            // copy balanced parenthesis with everything inside untouched
+            if (i < infix.size() && infix[i] == "(") {
+                copyBalanced(infix, i, output, "(", ")");
+            }
+            continue;
+        }
+
+        // check for bracket indexing
+        if (tok == "[" ) {
+            copyBalanced(infix, i, output, "[", "]");
+            continue;
+        }
+
+        // check for parentheses used in expressions
+        if (tok == "(") {
+            opstack.push_back(tok);
+            ++i;
+            continue;
+        }
+        // check for closing parentheses
+        if (tok == ")") {
+            while (!opstack.empty() && opstack.back() != "(") {
+                output.push_back(opstack.back());
+                opstack.pop_back();
+            }
+            if (!opstack.empty() && opstack.back() == "(") opstack.pop_back(); // discard "("
+            ++i;
+            continue;
+        }
+
+        // check for operators
+        if (isOperator(tok)) {
+            // Pop higher-precedence (or equal + left-assoc) operators
+            while (!opstack.empty() && isOperator(opstack.back())) {
+                const std::string& top = opstack.back();
+                int pTop = precedence(top), pTok = precedence(tok);
+                if ( (pTop > pTok) || (pTop == pTok && isLeftAssociative(tok)) ) {
+                    output.push_back(top);
+                    opstack.pop_back();
+                } else break;
+            }
+            opstack.push_back(tok);
+            ++i;
+            continue;
+        }
+
+        // push back plain operands
+        output.push_back(tok);
+        ++i;
+    }
+
+    // push final operators
+    while (!opstack.empty()) {
+        if (!isParen(opstack.back())) {
+            output.push_back(opstack.back());
+        }
+        opstack.pop_back();
+    }
+    return output;
 }
 
 CSTNode* buildAST(const std::vector<ASTElements>& elements, const std::vector<Token>& tokens) {
@@ -801,6 +919,7 @@ CSTNode* buildAST(const std::vector<ASTElements>& elements, const std::vector<To
             }
 
             CSTNode* tail = node;
+            stringsToBeAdded = toPostFix(stringsToBeAdded);
             for (const auto& s : stringsToBeAdded) {
                 CSTNode* sn = createCSTNode(s);
                 tail->right = sn;
@@ -822,6 +941,7 @@ CSTNode* buildAST(const std::vector<ASTElements>& elements, const std::vector<To
             }
 
             tail = node;
+            stringsToBeAdded = toPostFix(stringsToBeAdded);
             for (const auto& s : stringsToBeAdded) {
                 CSTNode* sn = createCSTNode(s);
                 tail->right = sn;
@@ -848,6 +968,7 @@ CSTNode* buildAST(const std::vector<ASTElements>& elements, const std::vector<To
             }
 
             tail = node;
+            stringsToBeAdded = toPostFix(stringsToBeAdded);
             for (const auto& s : stringsToBeAdded) {
                 CSTNode* sn = createCSTNode(s);
                 tail->right = sn;
@@ -880,6 +1001,7 @@ CSTNode* buildAST(const std::vector<ASTElements>& elements, const std::vector<To
 
             // Build the right chain of strings for this element
             CSTNode* tail = node;
+            stringsToBeAdded = toPostFix(stringsToBeAdded);
             for (const auto& s : stringsToBeAdded) {
                 CSTNode* sn = createCSTNode(s);
                 tail->right = sn;
