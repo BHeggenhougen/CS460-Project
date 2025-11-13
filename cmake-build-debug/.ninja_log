@@ -1,8 +1,8 @@
 # ninja log v6
-33	714	7846866569427850	build.ninja	6f358fa299c0a953
-61	858	7846027087607728	CMakeFiles/CS460_Project.dir/CS460-Programming_Assignment5/main.cpp.obj	b4274e8ab99dbd52
-859	1029	7846027095581118	CS460_Project.exe	df6d20d31a81811b
-7	1448	7846871843205234	CMakeFiles/CS460_Project.dir/CS460-Programming_Assignment5/main.cpp.obj	b4274e8ab99dbd52
-1448	2239	7846871857578172	CS460_Project.exe	df6d20d31a81811b
+67	648	7847602911395379	build.ninja	6f358fa299c0a953
 50	1418	7846872384491296	CMakeFiles/CS460_Project.dir/CS460-Programming_Assignment5/main.cpp.obj	b4274e8ab99dbd52
-1418	1662	7846872398172326	CS460_Project.exe	df6d20d31a81811b
+39	1271	7847602439823534	CMakeFiles/CS460_Project.dir/CS460-Programming_Assignment6/main.cpp.obj	19efd5cdd05991e1
+1271	1859	7847602452146177	CS460_Project.exe	73dd8e0c5ac6ab3d
+46	450	7847602911395379	build.ninja	6f358fa299c0a953
+6	1374	7847602956064479	CMakeFiles/CS460_Project.dir/CS460-Programming_Assignment6/main.cpp.obj	19efd5cdd05991e1
+1374	1607	7847602969748632	CS460_Project.exe	73dd8e0c5ac6ab3d

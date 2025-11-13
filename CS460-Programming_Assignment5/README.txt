@@ -1,4 +1,4 @@
-Name: Ben Heggenhougen
+Names: Ben Heggenhougen, Martin Villasenor, Myles Chen, Olivia Hunter
 
 To run the program:
 1. make
