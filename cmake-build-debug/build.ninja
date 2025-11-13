@@ -49,11 +49,11 @@ cmake_ninja_workdir = C$:/Users/benar/Downloads/CS460-Project/cmake-build-debug/
 
 build cmake_object_order_depends_target_CS460_Project: phony || .
 
-build CMakeFiles/CS460_Project.dir/CS460-Programming_Assignment5/main.cpp.obj: CXX_COMPILER__CS460_Project_unscanned_Debug C$:/Users/benar/Downloads/CS460-Project/CS460-Programming_Assignment5/main.cpp || cmake_object_order_depends_target_CS460_Project
-  DEP_FILE = CMakeFiles\CS460_Project.dir\CS460-Programming_Assignment5\main.cpp.obj.d
+build CMakeFiles/CS460_Project.dir/CS460-Programming_Assignment6/main.cpp.obj: CXX_COMPILER__CS460_Project_unscanned_Debug C$:/Users/benar/Downloads/CS460-Project/CS460-Programming_Assignment6/main.cpp || cmake_object_order_depends_target_CS460_Project
+  DEP_FILE = CMakeFiles\CS460_Project.dir\CS460-Programming_Assignment6\main.cpp.obj.d
   FLAGS = -g -std=gnu++14 -fdiagnostics-color=always
   OBJECT_DIR = CMakeFiles\CS460_Project.dir
-  OBJECT_FILE_DIR = CMakeFiles\CS460_Project.dir\CS460-Programming_Assignment5
+  OBJECT_FILE_DIR = CMakeFiles\CS460_Project.dir\CS460-Programming_Assignment6
 
 
 # =============================================================================
@@ -63,7 +63,7 @@ build CMakeFiles/CS460_Project.dir/CS460-Programming_Assignment5/main.cpp.obj: C
 #############################################
 # Link the executable CS460_Project.exe
 
-build CS460_Project.exe: CXX_EXECUTABLE_LINKER__CS460_Project_Debug CMakeFiles/CS460_Project.dir/CS460-Programming_Assignment5/main.cpp.obj
+build CS460_Project.exe: CXX_EXECUTABLE_LINKER__CS460_Project_Debug CMakeFiles/CS460_Project.dir/CS460-Programming_Assignment6/main.cpp.obj
   FLAGS = -g
   LINK_LIBRARIES = -lkernel32 -luser32 -lgdi32 -lwinspool -lshell32 -lole32 -loleaut32 -luuid -lcomdlg32 -ladvapi32
   OBJECT_DIR = CMakeFiles\CS460_Project.dir
