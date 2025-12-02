@@ -47,6 +47,8 @@ struct Token {
 
 int globalScope = 0; // used for keeping track of scope
 int scopeCounter = 0;
+bool gDidReturn = false;
+int  gReturnValue = 0;
 
 std::vector<Token> tokenList;
 
@@ -545,6 +547,15 @@ struct SymbolTableNode {
     int scope{};
     SymbolTableNode* parameterList = nullptr;
     SymbolTableNode* next = nullptr;
+    std::string symbolValue;
+
+    void setValue (std::string value) {
+        symbolValue = value;
+    }
+
+    std::string getValue () {
+        return symbolValue;
+    }
 
     // constructors
     SymbolTableNode() = default;
@@ -1017,6 +1028,863 @@ CSTNode* buildAST(const std::vector<ASTElements>& elements, const std::vector<To
     }
     return root;
 }
+
+// finds and returns a symbol table node given the identifier name
+SymbolTableNode *findSymbolTableNode(std::string symbolName, SymbolTableNode *head) {
+    if (!head) return head;
+    for (auto* cur = head; cur; cur = cur->next) { // loop until the node is found
+        if (cur->identifierName == symbolName) {
+            return cur;
+        }
+        if (cur->parameterList) {
+            for (auto* p = cur->parameterList; p; p = p->next) {
+                if (p->identifierName == symbolName) {
+                    return p;
+                }
+            }
+        }
+    }
+    return head; // fallback
+}
+
+// returns a symbol table node at a given index
+SymbolTableNode *findSymbolTableNodeAt(SymbolTableNode *head, int index) {
+    if (!head) return head;
+    int counter = 0;
+    for (auto* cur = head; cur; cur = cur->next) { // loop until the index is reached
+        if (counter == index) return cur;
+        counter++;
+    }
+    return head; // fallback
+}
+
+// helper to go to the next statement
+CSTNode* nextStatement(CSTNode* n) {
+    if (!n) return nullptr;
+    while (n->right) n = n->right;
+    return n->left;
+}
+
+// helper to skip past an entire block
+CSTNode* skipBlock(CSTNode* beginNode) {
+    CSTNode* cur = nextStatement(beginNode);
+    int depth = 1;
+
+    while (cur && depth > 0) {
+        if (cur->value == "BEGIN BLOCK") depth++; // check for inner blocks
+        else if (cur->value == "END BLOCK") depth--;
+
+        cur = nextStatement(cur);
+    }
+
+    return cur;
+}
+
+// check if input string is an integer
+bool isInt(const std::string& s) {
+    if (s.empty()) return false;
+    size_t i = 0;
+    if (s[0] == '-' || s[0] == '+') i = 1; // check for leading - or +
+    if (i >= s.size()) return false;
+    for (; i < s.size(); ++i) {
+        if (!std::isdigit((unsigned char)s[i])) return false;
+    }
+    return true;
+}
+
+// gets the value of an integer, literal, or variable
+int getValue(const std::string& tok, SymbolTableNode* head) {
+    // check for character literals (starting with quotes)
+    if (tok.size() >= 3 && tok.front() == '\'' && tok.back() == '\'') {
+        std::string inner = tok.substr(1, tok.size() - 2); // cut out quotes
+        if (inner.empty()) {
+            return 0;
+        }
+
+        // check for escapes
+        if (inner[0] == '\\') {
+            if (inner.size() == 2) {
+                char esc = inner[1];
+                switch (esc) {
+                    case 'n':  return '\n';
+                    case 't':  return '\t';
+                    case 'r':  return '\r';
+                    case '0':  return '\0';
+                    case '\\': return '\\';
+                    case '\'': return '\'';
+                    case '\"': return '\"';
+                    default:   return static_cast<unsigned char>(esc);
+                }
+            }
+            // check for hex escapes
+            if (inner.size() >= 3 && inner[1] == 'x') {
+                int val = 0;
+                for (size_t i = 2; i < inner.size(); ++i) {
+                    char h = inner[i];
+                    int v;
+                    if (h >= '0' && h <= '9')      v = h - '0';
+                    else if (h >= 'a' && h <= 'f') v = 10 + (h - 'a');
+                    else if (h >= 'A' && h <= 'F') v = 10 + (h - 'A');
+                    else break;
+                    val = val * 16 + v;
+                }
+                return val;
+            }
+
+            // return last character for outliers
+            return static_cast<unsigned char>(inner.back());
+        } else {
+            // return single character
+            return static_cast<unsigned char>(inner[0]);
+        }
+    }
+
+    // for literal ints just convert
+    if (isInt(tok)) {
+        return std::stoi(tok);
+    }
+
+    // search for variable in symbol table (preferring variables that are already assigned)
+    SymbolTableNode* bestMatch = nullptr;     // first node with this name
+    SymbolTableNode* initializedMatch = nullptr; // first node with this name and a value
+
+    for (auto* cur = head; cur; cur = cur->next) {
+        if (cur->identifierName == tok) {
+            if (!bestMatch) bestMatch = cur;
+            if (!cur->getValue().empty() && !initializedMatch) {
+                initializedMatch = cur;
+            }
+        }
+        if (cur->parameterList) {
+            for (auto* p = cur->parameterList; p; p = p->next) {
+                if (p->identifierName == tok) {
+                    if (!bestMatch) bestMatch = p;
+                    if (!p->getValue().empty() && !initializedMatch) {
+                        initializedMatch = p;
+                    }
+                }
+            }
+        }
+    }
+
+    // prefer duplicate variables that have already been assigned
+    SymbolTableNode* sym = initializedMatch ? initializedMatch : bestMatch;
+
+    // error handling
+    if (!sym) {
+        std::cerr << "Runtime error: unknown variable \"" << tok << "\"\n";
+        std::exit(1);
+    }
+
+    const std::string& v = sym->getValue();
+    if (v.empty()) {
+        std::cerr << "Runtime error: variable \"" << tok
+                  << "\" used before initialization\n";
+        std::exit(1);
+    }
+
+    return std::stoi(v);
+}
+
+// predefine function
+int callProcedureOrFunction(const std::string& name,
+                            CSTNode* callExprHead,
+                            SymbolTableNode* head,
+                            CSTNode* AST,
+                            bool expectReturn);
+
+// evaluate assignment expressions given a postfix input
+void evalExpression(CSTNode* inputNode, SymbolTableNode* head, CSTNode* AST) {
+    CSTNode* node = inputNode->right; // skip leading statement (ASSIGNMENT)
+    if (!node) {
+        std::cerr << "Runtime error: empty assignment expression\n";
+        std::exit(1);
+    }
+
+
+    std::stack<std::string> st;
+    bool awaitingCharLiteral = false; // keeps track of if quotes are seen
+
+    while (node) {
+        const std::string& tok = node->value;
+
+        // ignore quotes
+        if (tok == "\"") {
+            node = node->right;
+            continue;
+        }
+
+        // keep track of single quotes for literal characters
+        if (tok == "\'") {
+            awaitingCharLiteral = !awaitingCharLiteral;
+            node = node->right;
+            continue;
+        }
+
+        // check for function calls (parentheses will only be present in function calls)
+        if (!isOperator(tok) && node->right && node->right->value == "(") {
+            int funcResult = callProcedureOrFunction(tok, node, head, AST, true); // call that function expecting a return value
+            st.push(std::to_string(funcResult)); // push result onto the stack
+
+            CSTNode* n = node->right;
+            int depth = 0;
+            while (n) {
+                if (n->value == "(") {
+                    depth++;
+                } else if (n->value == ")") {
+                    depth--;
+                    if (depth == 0) {
+                        n = n->right;
+                        break;
+                    }
+                }
+                n = n->right;
+            }
+
+            node = n;
+            continue;
+        }
+
+        // check for normal operands
+        if (!isOperator(tok)) {
+            if (awaitingCharLiteral) {
+                // encode and push character literals
+                st.push(std::string("'") + tok + std::string("'"));
+            } else {
+                st.push(tok);
+            }
+        }
+
+        // check for assignment
+        else if (tok == "=") {
+            if (st.size() < 2) {
+                std::cerr << "Runtime error: invalid assignment expression\n";
+                std::exit(1);
+            }
+
+            // get the variable and value to be assigned to that variable
+            std::string newValueToken  = st.top(); st.pop();
+            std::string variable = st.top(); st.pop();
+
+            SymbolTableNode* variableSymbolNode = findSymbolTableNode(variable, head); // get the variable from the symbol table
+            if (!variableSymbolNode) {
+                std::cerr << "Runtime error: assignment to undeclared variable \""
+                          << variable << "\"\n";
+                std::exit(1);
+            }
+
+            // assign integer
+            if (variableSymbolNode->dataType == DataTypes::Int && !variableSymbolNode->dataTypeIsArray) {
+                int newValue = getValue(newValueToken, head); // get integer value of the string token
+                variableSymbolNode->setValue(std::to_string(newValue)); // set the value
+                st.push(std::to_string(newValue));
+            }
+            // assign array
+            else if (variableSymbolNode->dataType == DataTypes::Char && variableSymbolNode->dataTypeIsArray) {
+                variableSymbolNode->setValue(newValueToken);
+                st.push(newValueToken);
+            }
+            // assign string
+            else {
+                variableSymbolNode->setValue(newValueToken);
+                st.push(newValueToken);
+            }
+        }
+        else { // operators
+            if (st.size() < 2) {
+                std::cerr << "Runtime error: not enough operands for operator " << tok << "\n";
+                std::exit(1);
+            }
+            // take the top two values from the stack
+            std::string bTok = st.top(); st.pop();
+            std::string aTok = st.top(); st.pop();
+
+            // get their values, converting to int
+            int b = getValue(bTok, head);
+            int a = getValue(aTok, head);
+            int result = 0;
+
+            // evaluate based on the operator
+            if (tok == "+")      result = a + b;
+            else if (tok == "-") result = a - b;
+            else if (tok == "*") result = a * b;
+            else if (tok == "/") result = a / b;
+            else if (tok == "%") result = a % b;
+            else if (tok == "<")  result = (a <  b);
+            else if (tok == ">")  result = (a >  b);
+            else if (tok == "<=") result = (a <= b);
+            else if (tok == ">=") result = (a >= b);
+            else if (tok == "==") result = (a == b);
+            else if (tok == "!=") result = (a != b);
+            else if (tok == "&&") result = (a && b);
+            else if (tok == "||") result = (a || b);
+            else {
+                std::cerr << "Runtime error: unsupported operator " << tok << "\n";
+                std::exit(1);
+            }
+            // push the result to the stack
+            st.push(std::to_string(result));
+        }
+
+        node = node->right;
+    }
+}
+
+// evaluate and return a condition
+int evalCondition(CSTNode* exprHead, SymbolTableNode* head, CSTNode* AST) {
+    if (!exprHead) {
+        std::cerr << "Runtime error: empty expression\n";
+        std::exit(1);
+    }
+
+    CSTNode* node = exprHead;
+
+    if (!isOperator(node->value) && node->right && node->right->value == "[") { // check for arrays
+        std::string arrayName = node->value;
+
+        CSTNode* bracket = node->right;
+        CSTNode* cur = bracket->right;
+
+        // Collect index tokens
+        std::vector<std::string> indexTokens;
+        while (cur && cur->value != "]") {
+            indexTokens.push_back(cur->value);
+            cur = cur->right;
+        }
+
+        // Check for closing bracket
+        if (cur && cur->value == "]" && cur->right == nullptr) {
+            // Convert index to postfix
+            std::vector<std::string> idxPost = toPostFix(indexTokens);
+
+            CSTNode* dummyHead = createCSTNode("<IDX>");
+            CSTNode* tail = dummyHead;
+            for (const auto& s : idxPost) {
+                tail->right = createCSTNode(s);
+                tail = tail->right;
+            }
+
+            int indexValue = evalCondition(dummyHead->right, head, AST); // eval index individually
+
+            // get array node
+            SymbolTableNode* arrSym = findSymbolTableNode(arrayName, head);
+            if (!arrSym) {
+                std::cerr << "Runtime error: unknown array \"" << arrayName << "\"\n";
+                std::exit(1);
+            }
+
+            // check for char array
+            if (!(arrSym->dataType == DataTypes::Char && arrSym->dataTypeIsArray)) {
+                std::cerr << "Runtime error: \"" << arrayName
+                          << "\" is not a char array (used as array indexing)\n";
+                std::exit(1);
+            }
+
+            const std::string& arrVal = arrSym->getValue();
+            char ch = '\0';
+            if (indexValue >= 0 && indexValue < static_cast<int>(arrVal.size())) { // make sure value is in bounds
+                ch = arrVal[indexValue];
+            } else {
+                ch = '\0';
+            }
+
+            // return the char as an int
+            return static_cast<unsigned char>(ch);
+        }
+    }
+
+    std::stack<std::string> st;
+    node = exprHead;
+    bool awaitingCharLiteral = false; // keeps track of if quotes are seen
+
+    while (node) {
+        const std::string& tok = node->value;
+
+        if (tok == "\"") { // ignore quotes
+            node = node->right;
+            continue;
+        }
+
+        if (tok == "\'") { // keep track of single quotes for literal characters
+            awaitingCharLiteral = !awaitingCharLiteral;
+            node = node->right;
+            continue;
+        }
+
+        // check for function calls
+        if (!isOperator(tok) && node->right && node->right->value == "(") {
+            int funcResult = callProcedureOrFunction(tok, node, head, AST, true); // expect a return
+            st.push(std::to_string(funcResult));
+
+            CSTNode* n = node->right;
+            int depth = 0;
+            while (n) {
+                if (n->value == "(") {
+                    depth++;
+                } else if (n->value == ")") {
+                    depth--;
+                    if (depth == 0) {
+                        n = n->right;
+                        break;
+                    }
+                }
+                n = n->right;
+            }
+
+            node = n;
+            continue;
+        }
+
+        if (!isOperator(tok)) {
+            if (awaitingCharLiteral) {
+                st.push(std::string("'") + tok + std::string("'"));
+            } else {
+                st.push(tok);
+            }
+        } else if (tok == "=") {
+            std::cerr << "Runtime error: unexpected '=' in rvalue expression\n";
+            std::exit(1);
+        } else {
+            if (st.size() < 2) {
+                std::cerr << "Runtime error: not enough operands for operator " << tok << "\n";
+                std::exit(1);
+            }
+            std::string bTok = st.top(); st.pop();
+            std::string aTok = st.top(); st.pop();
+
+            int b = getValue(bTok, head);
+            int a = getValue(aTok, head);
+            int result = 0;
+
+            if (tok == "+")      result = a + b;
+            else if (tok == "-") result = a - b;
+            else if (tok == "*") result = a * b;
+            else if (tok == "/") result = a / b;
+            else if (tok == "%") result = a % b;
+            else if (tok == "<")  result = (a <  b);
+            else if (tok == ">")  result = (a >  b);
+            else if (tok == "<=") result = (a <= b);
+            else if (tok == ">=") result = (a >= b);
+            else if (tok == "==") result = (a == b);
+            else if (tok == "!=") result = (a != b);
+            else if (tok == "&&") result = (a && b);
+            else if (tok == "||") result = (a || b);
+            else {
+                std::cerr << "Runtime error: unsupported operator " << tok << "\n";
+                std::exit(1);
+            }
+
+            st.push(std::to_string(result));
+        }
+
+        node = node->right;
+    }
+
+    if (st.size() != 1) {
+        std::cerr << "Runtime error: malformed expression\n";
+        std::exit(1);
+    }
+    return getValue(st.top(), head);
+}
+
+// helper for printing C Strings
+std::string renderCString(const std::string& raw) {
+    std::string out;
+
+    for (size_t i = 0; i < raw.size(); ) {
+        char c = raw[i];
+
+        // print non-escape characters as they are
+        if (c != '\\') {
+            out.push_back(c);
+            ++i;
+            continue;
+        }
+
+        // Escape sequence
+        if (i + 1 >= raw.size()) {
+            // print trailing backslash
+            out.push_back('\\');
+            break;
+        }
+
+        char esc = raw[i + 1];
+
+        // check for simple escapes
+        if (esc == 'n') {
+            out.push_back('\n');
+            i += 2;
+        } else if (esc == 't') {
+            out.push_back('\t');
+            i += 2;
+        } else if (esc == 'r') {
+            out.push_back('\r');
+            i += 2;
+        } else if (esc == '0') {
+            break;
+        } else if (esc == 'x') { // check for hex escapes
+            int val = 0;
+            size_t j = i + 2;
+            int digits = 0;
+
+            while (j < raw.size() && digits < 2 && std::isxdigit((unsigned char)raw[j])) {
+                char h = raw[j];
+                int v;
+                if (h >= '0' && h <= '9')      v = h - '0';
+                else if (h >= 'a' && h <= 'f') v = 10 + (h - 'a');
+                else                            v = 10 + (h - 'A');
+                val = val * 16 + v;
+                ++j;
+                ++digits;
+            }
+
+            if (val == 0) {
+                // null
+                break;
+            }
+
+            out.push_back(static_cast<char>(val));
+            i = j;
+        } else {
+            out.push_back(esc);
+            i += 2;
+        }
+    }
+
+    return out;
+}
+
+// execute printf statements
+void executePrintf(CSTNode* node, SymbolTableNode* head) {
+    CSTNode* tok = node->right;
+    if (!tok) return;
+
+    std::string val = tok->value;
+    tok = tok->right;
+
+    // Collect argument values
+    std::vector<std::string> args;
+    while (tok) {
+        SymbolTableNode* sym = findSymbolTableNode(tok->value, head);
+        if (!sym) {
+            std::cerr << "Runtime error: unknown variable \"" << tok->value << "\" in printf\n";
+            std::exit(1);
+        }
+        args.push_back(sym->getValue());
+        tok = tok->right;
+    }
+
+    int argIndex = 0;
+
+    // parse string to look for args
+    for (size_t i = 0; i < val.size(); i++) {
+        char c = val[i];
+
+        // Handle escapes like \n
+        if (c == '\\' && i + 1 < val.size()) {
+            char next = val[i + 1];
+            if (next == 'n') {
+                std::cout << "\n";
+                i++;
+                continue;
+            }
+        }
+
+        // Handle specifiers for arguments
+        if (c == '%' && i + 1 < val.size()) {
+            char next = val[i + 1];
+
+            if (next == 'd') {
+                if (argIndex >= (int)args.size()) {
+                    std::cerr << "Runtime error: missing argument for %d\n";
+                    std::exit(1);
+                }
+                std::cout << args[argIndex++];  // print argument
+                i++; // skip specifier
+                continue;
+            }
+            else if (next == 's') {
+                if (argIndex >= (int)args.size()) {
+                    std::cerr << "Runtime error: missing argument for %s\n";
+                    std::exit(1);
+                }
+                std::cout << renderCString(args[argIndex++]); // handle c strings
+                i++;
+                continue;
+            }
+        }
+
+        // Normal char
+        std::cout << c;
+    }
+}
+
+// Executes full blocks
+CSTNode* executeBlock(CSTNode* beginNode, SymbolTableNode* head, CSTNode* AST) {
+    CSTNode* cur = nextStatement(beginNode); // skip first begin block
+
+    while (cur && cur->value != "END BLOCK") {
+        const std::string& tag = cur->value;
+
+        if (tag == "ASSIGNMENT ") { // evaluate expressions for ASSIGNMENT statements
+            evalExpression(cur, head, AST);
+        }
+        else if (tag == "PRINTF ") { // execute PRINTF statements
+            executePrintf(cur, head);
+        }
+        else if (tag == "IF ") { // evaluate IF statements then go into that block
+            int cond = evalCondition(cur->right, head, AST); // evaluate postfix
+            CSTNode* thenBegin = nextStatement(cur); // step into if block
+
+            if (cond) {
+                CSTNode* afterThen = executeBlock(thenBegin, head, AST); // execute the if block if the condition is true
+                if (afterThen && afterThen->value == "ELSE") {
+                    CSTNode* elseBegin = nextStatement(afterThen);
+                    afterThen = skipBlock(elseBegin);
+                }
+                cur = afterThen;
+                continue;
+            } else {
+                CSTNode* afterThen = skipBlock(thenBegin); // skip the block if the condition is false
+                if (afterThen && afterThen->value == "ELSE") { // evaluate the ELSE block if there is one
+                    CSTNode* elseBegin = nextStatement(afterThen);
+                    cur = executeBlock(elseBegin, head, AST);
+                } else {
+                    cur = afterThen;
+                }
+                continue;
+            }
+        }
+        else if (tag == "WHILE ") { // execute WHILE statement
+            CSTNode* whileNode = cur;
+            CSTNode* bodyBegin = nextStatement(cur);
+
+            while (true) {
+                int cond = evalCondition(whileNode->right, head, AST); // check the condition
+                if (!cond) { // if the condition is false, skip the block and break
+                    cur = skipBlock(bodyBegin);
+                    break;
+                }
+                executeBlock(bodyBegin, head, AST); // execute the block until the condition is not true
+            }
+            continue;
+        }
+        else if (tag == "FOR EXPRESSION 1") {
+            CSTNode* forInit = cur; // initialized var
+            CSTNode* forCond = nextStatement(forInit); // condition
+            CSTNode* forIter = nextStatement(forCond); // iterator
+            CSTNode* bodyBegin = nextStatement(forIter);  // begin block
+
+            // initialize the variable
+            if (forInit && forInit->right) {
+                CSTNode fakeInitRoot{"ASSIGNMENT ", nullptr, forInit->right};
+                evalExpression(&fakeInitRoot, head, AST);
+            }
+
+            // loop while the condition is true
+            while (true) {
+                int cond = 1;
+                if (forCond && forCond->right) {
+                    cond = evalCondition(forCond->right, head, AST); // check the condition
+                }
+
+                if (!cond) {
+                    // skip the body and break
+                    cur = skipBlock(bodyBegin);
+                    break;
+                }
+
+                executeBlock(bodyBegin, head, AST); // execute the block if the condition is true
+
+                // iterate
+                if (forIter && forIter->right) {
+                    CSTNode fakeIterRoot{"ASSIGNMENT ", nullptr, forIter->right};
+                    evalExpression(&fakeIterRoot, head, AST);
+                }
+            }
+
+            continue;
+        }
+        else if (tag == "CALL ") { // evaluate CALL statement
+            // check for function/procedure name
+            if (!cur->right) {
+                std::cerr << "Internal error: CALL node missing callee name\n";
+                std::exit(1);
+            }
+
+            std::string calleeName = cur->right->value;
+
+            (void)callProcedureOrFunction(calleeName, cur->right, head, AST, false); // call
+        }
+        else if (tag == "RETURN ") { // execute RETURN statement
+            gReturnValue = evalCondition(cur->right, head, AST); // convert from postfix and store return value
+            gDidReturn = true;
+
+            return skipBlock(beginNode);
+        }
+
+        cur = nextStatement(cur);
+    }
+
+    if (cur && cur->value == "END BLOCK") { // end
+        return nextStatement(cur);
+    }
+    return cur;
+}
+
+// call functions/procedures
+int callProcedureOrFunction(const std::string& name, CSTNode* callExprHead, SymbolTableNode* head, CSTNode* AST, bool expectReturn)
+{
+    // get symbol table node
+    SymbolTableNode* declSym = findSymbolTableNode(name, head);
+    if (!declSym) {
+        std::cerr << "Runtime error: call to unknown identifier \"" << name << "\"\n";
+        std::exit(1);
+    }
+
+    // check for function or procedure
+    bool isFunction  = (declSym->identifierType == "function");
+    bool isProcedure = (declSym->identifierType == "procedure");
+
+    // error handling
+    if (expectReturn && !isFunction) {
+        std::cerr << "Runtime error: procedure \"" << name
+                  << "\" used in an expression context\n";
+        std::exit(1);
+    }
+
+    // get argument values
+    std::vector<int> argValues;
+    {
+        CSTNode* n = callExprHead->right; // move to args
+        std::vector<std::string> currentArg;
+        int parenDepth = 0;
+        bool collecting = false;
+
+        while (n) { // store all args
+            if (n->value == "(") {
+                parenDepth++;
+                collecting = true;
+            } else if (n->value == ")") {
+                parenDepth--;
+                if (parenDepth == 0) {
+                    if (!currentArg.empty()) { // collect last arg
+                        CSTNode* dummyHead = createCSTNode("<ARG>");
+                        CSTNode* tail = dummyHead;
+                        for (auto& s : currentArg) {
+                            tail->right = createCSTNode(s);
+                            tail = tail->right;
+                        }
+                        int val = evalCondition(dummyHead->right, head, AST);
+                        argValues.push_back(val);
+                        currentArg.clear();
+                    }
+                    break;
+                }
+            } else if (collecting) {
+                if (n->value == "," && parenDepth == 1) {
+                    if (!currentArg.empty()) { // collect arg
+                        CSTNode* dummyHead = createCSTNode("<ARG>");
+                        CSTNode* tail = dummyHead;
+                        for (auto& s : currentArg) {
+                            tail->right = createCSTNode(s);
+                            tail = tail->right;
+                        }
+                        int val = evalCondition(dummyHead->right, head, AST);
+                        argValues.push_back(val);
+                        currentArg.clear();
+                    }
+                } else {
+                    currentArg.push_back(n->value);
+                }
+            }
+            n = n->right;
+        }
+    }
+
+    // assign new paramenter list values in symbol table
+    SymbolTableNode* param = declSym->parameterList;
+    auto it = argValues.begin();
+    while (param && it != argValues.end()) {
+        param->setValue(std::to_string(*it));
+        param = param->next;
+        ++it;
+    }
+    if (param || it != argValues.end()) {
+        std::cerr << "Runtime error: argument count mismatch when calling \""
+                  << name << "\"\n";
+        std::exit(1);
+    }
+
+    // find corresponding AST node for the function/procedure
+    int declaratorIndex = 0;
+    CSTNode* curNode = AST;
+    while (curNode) {
+        if (curNode->value == "DECLARATION") {
+            SymbolTableNode* symAtIndex = findSymbolTableNodeAt(head, declaratorIndex);
+            if (!symAtIndex) {
+                std::cerr << "Internal error: symbol table / AST mismatch\n";
+                std::exit(1);
+            }
+            if (symAtIndex == declSym) {
+                break;
+            }
+            declaratorIndex++;
+        }
+        while (curNode->right) curNode = curNode->right;
+        curNode = curNode->left;
+    }
+    if (!curNode) {
+        std::cerr << "Internal error: can't find AST declaration for \""
+                  << name << "\"\n";
+        std::exit(1);
+    }
+
+    // go to the begin block of the right function/procedure
+    curNode = curNode->left;
+    if (!curNode || curNode->value != "BEGIN BLOCK") {
+        std::cerr << "Internal error: malformed AST for \"" << name << "\"\n";
+        std::exit(1);
+    }
+
+    gDidReturn = false;
+    gReturnValue = 0;
+    executeBlock(curNode, head, AST); // execute the block of the function/procedure
+
+    if (expectReturn) { // return if a return is expected
+        if (!gDidReturn) {
+            std::cerr << "Runtime error: function \"" << name
+                      << "\" did not return a value\n";
+            std::exit(1);
+        }
+        return gReturnValue;
+    } else {
+        return 0;
+    }
+}
+
+// executes program
+void interpreter (SymbolTableNode* head, CSTNode* AST) {
+    int declaratorIndex = 0;
+    CSTNode* cur = AST;
+    gDidReturn = false;
+    gReturnValue = 0;
+    while (true) { // go to main
+        if (cur->value == "DECLARATION") {
+            if(findSymbolTableNodeAt(head, declaratorIndex)->identifierName == "main") break;
+            declaratorIndex++;
+        }
+        while (cur->right) {
+            cur = cur->right;
+        }
+        cur = cur->left;
+    }
+    cur = cur->left;
+    if (cur && cur->value == "BEGIN BLOCK") { // execute main
+        executeBlock(cur, head, AST);
+    }
+}
+
 
 /**************** PARSER ****************/
 
@@ -1577,8 +2445,9 @@ int main( int argc, char *argv[] ) {
                 }
                 std::vector<ASTElements> test = basicAST;
                 CSTNode* AST = buildAST(test, tokenList);
-                printCST(AST);
+                //printCST(AST);
                 //printSymbolTable(head);
+                interpreter(head, AST);
                 /*CSTNode* root = buildCSTFromTokens(tokenList);
 
                 if (!root) {
